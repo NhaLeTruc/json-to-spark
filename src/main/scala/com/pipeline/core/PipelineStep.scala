@@ -452,8 +452,23 @@ object PipelineStepUtils {
       case "MEMORY_AND_DISK_SER"   => StorageLevel.MEMORY_AND_DISK_SER
       case "MEMORY_AND_DISK_SER_2" => StorageLevel.MEMORY_AND_DISK_SER_2
       case "OFF_HEAP"              => StorageLevel.OFF_HEAP
-      case _                       =>
-        logger.warn(s"Unknown storage level: $level, defaulting to MEMORY_AND_DISK")
-        StorageLevel.MEMORY_AND_DISK
+      case invalid                 =>
+        val validLevels = List(
+          "NONE",
+          "DISK_ONLY",
+          "DISK_ONLY_2",
+          "MEMORY_ONLY",
+          "MEMORY_ONLY_2",
+          "MEMORY_ONLY_SER",
+          "MEMORY_ONLY_SER_2",
+          "MEMORY_AND_DISK",
+          "MEMORY_AND_DISK_2",
+          "MEMORY_AND_DISK_SER",
+          "MEMORY_AND_DISK_SER_2",
+          "OFF_HEAP",
+        )
+        throw new IllegalArgumentException(
+          s"Invalid storage level: '$invalid'. Valid values: ${validLevels.mkString(", ")}",
+        )
     }
 }
