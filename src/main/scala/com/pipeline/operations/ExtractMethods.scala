@@ -38,6 +38,10 @@ object ExtractMethods {
       .option("user", jdbcConfig.username)
       .option("password", jdbcConfig.password)
       .option("driver", "org.postgresql.Driver")
+      // Connection pooling and performance options
+      .option("fetchsize", config.getOrElse("fetchSize", "10000").toString)
+      .option("batchsize", config.getOrElse("batchSize", "10000").toString)
+      .option("queryTimeout", config.getOrElse("queryTimeout", "300").toString) // 5 minutes default
 
     // Add partitioning if specified
     val partitionedReader = config.get("partitionColumn") match {
@@ -85,6 +89,10 @@ object ExtractMethods {
       .option("user", jdbcConfig.username)
       .option("password", jdbcConfig.password)
       .option("driver", "com.mysql.cj.jdbc.Driver")
+      // Connection pooling and performance options
+      .option("fetchsize", config.getOrElse("fetchSize", "10000").toString)
+      .option("batchsize", config.getOrElse("batchSize", "10000").toString)
+      .option("queryTimeout", config.getOrElse("queryTimeout", "300").toString) // 5 minutes default
 
     // Add partitioning if specified
     val partitionedReader = config.get("partitionColumn") match {
