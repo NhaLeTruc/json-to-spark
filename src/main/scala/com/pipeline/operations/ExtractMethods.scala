@@ -268,9 +268,28 @@ object ExtractMethods {
   }
 
   /**
+   * Checks if direct credentials are allowed based on environment.
+   * In production, only Vault credentials are permitted.
+   */
+  private def validateCredentialSource(hasVaultPath: Boolean, credentialType: String): Unit = {
+    val env    = sys.env.getOrElse("ENVIRONMENT", "development").toLowerCase
+    val isProd = env == "production" || env == "prod"
+
+    if (isProd && !hasVaultPath) {
+      throw new com.pipeline.exceptions.CredentialException(
+        s"Direct credentials not allowed in production environment. Use Vault credentialPath for $credentialType.",
+        credentialType = Some(credentialType),
+      )
+    }
+  }
+
+  /**
    * Resolves JDBC credentials from Vault or config.
    */
-  private def resolveJdbcCredentials(config: Map[String, Any], credentialType: String): JdbcConfig =
+  private def resolveJdbcCredentials(config: Map[String, Any], credentialType: String): JdbcConfig = {
+    val hasVaultPath = config.contains("credentialPath")
+    validateCredentialSource(hasVaultPath, credentialType)
+
     config.get("credentialPath") match {
       case Some(path) =>
         logger.info(s"Resolving JDBC credentials from Vault: $path")
@@ -282,8 +301,8 @@ object ExtractMethods {
             throw new RuntimeException(s"Failed to read credentials from Vault: ${ex.getMessage}", ex)
         }
       case None       =>
-        // Credentials provided directly in config (not recommended for production)
-        logger.warn("Using credentials from config - not recommended for production")
+        // Credentials provided directly in config (only allowed in non-production)
+        logger.warn("Using credentials from config - development/testing only")
         JdbcConfig(
           host = config("host").toString,
           port = config("port").toString.toInt,
@@ -293,11 +312,15 @@ object ExtractMethods {
           credentialType = credentialType,
         )
     }
+  }
 
   /**
    * Resolves S3 IAM credentials from Vault or config.
    */
-  private def resolveS3Credentials(config: Map[String, Any]): IAMConfig =
+  private def resolveS3Credentials(config: Map[String, Any]): IAMConfig = {
+    val hasVaultPath = config.contains("credentialPath")
+    validateCredentialSource(hasVaultPath, "s3")
+
     config.get("credentialPath") match {
       case Some(path) =>
         logger.info(s"Resolving S3 credentials from Vault: $path")
@@ -309,7 +332,7 @@ object ExtractMethods {
             throw new RuntimeException(s"Failed to read credentials from Vault: ${ex.getMessage}", ex)
         }
       case None       =>
-        logger.warn("Using S3 credentials from config - not recommended for production")
+        logger.warn("Using S3 credentials from config - development/testing only")
         IAMConfig(
           accessKeyId = config("accessKeyId").toString,
           secretAccessKey = config("secretAccessKey").toString,
@@ -317,11 +340,15 @@ object ExtractMethods {
           region = config.getOrElse("region", "us-east-1").toString,
         )
     }
+  }
 
   /**
    * Resolves Kafka credentials from Vault or config.
    */
-  private def resolveKafkaCredentials(config: Map[String, Any]): OtherConfig =
+  private def resolveKafkaCredentials(config: Map[String, Any]): OtherConfig = {
+    val hasVaultPath = config.contains("credentialPath")
+    validateCredentialSource(hasVaultPath, "kafka")
+
     config.get("credentialPath") match {
       case Some(path) =>
         logger.info(s"Resolving Kafka credentials from Vault: $path")
@@ -333,9 +360,11 @@ object ExtractMethods {
             throw new RuntimeException(s"Failed to read credentials from Vault: ${ex.getMessage}", ex)
         }
       case None       =>
+        logger.warn("Using Kafka credentials from config - development/testing only")
         // Return config as-is
         OtherConfig(config.map { case (k, v) => k -> v.toString })
     }
+  }
 
   /**
    * Reads data from Avro files.
