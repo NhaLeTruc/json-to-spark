@@ -151,6 +151,22 @@ case class ExtractStep(
     // Extract logic delegated to ExtractMethods
     val df = extractData(spark, isStreaming)
 
+    // Validate extraction if configured
+    val failOnEmpty = config.getOrElse("failOnEmpty", false).toString.toBoolean
+    if (failOnEmpty && !df.isStreaming) {
+      // Check if DataFrame is empty (only for batch mode)
+      val isEmpty = df.head(1).isEmpty
+      if (isEmpty) {
+        throw new PipelineExecutionException(
+          s"Extraction produced no data and failOnEmpty=true for method: $method",
+          stepType = Some("extract"),
+          method = Some(method),
+          config = Some(config),
+        )
+      }
+      logger.info("DataFrame validation passed: data exists")
+    }
+
     // Register DataFrame if registerAs is specified
     val contextWithDF = config.get("registerAs") match {
       case Some(name) =>
