@@ -198,8 +198,8 @@ scalafmt {
 }
 
 test {
-    // ScalaTest uses its own test runner
-    useJUnit()
+    // ScalaTest integrates with JUnit Platform
+    useJUnitPlatform()
 
     testLogging {
         events "passed", "skipped", "failed"
