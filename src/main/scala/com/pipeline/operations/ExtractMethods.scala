@@ -61,7 +61,7 @@ object ExtractMethods {
         partitionedReader.option("dbtable", table).load()
     }
 
-    logger.info(s"Extracted ${df.count()} rows from PostgreSQL")
+    logger.info("Successfully extracted data from PostgreSQL")
     df
   }
 
@@ -108,7 +108,7 @@ object ExtractMethods {
         partitionedReader.option("dbtable", table).load()
     }
 
-    logger.info(s"Extracted ${df.count()} rows from MySQL")
+    logger.info("Successfully extracted data from MySQL")
     df
   }
 
@@ -228,7 +228,7 @@ object ExtractMethods {
 
     val df = reader.load(s3Path)
 
-    logger.info(s"Extracted ${df.count()} rows from S3")
+    logger.info(s"Successfully extracted data from S3: $s3Path")
     df
   }
 
@@ -263,7 +263,7 @@ object ExtractMethods {
         reader.load(path)
     }
 
-    logger.info(s"Extracted ${df.count()} rows from DeltaLake")
+    logger.info(s"Successfully extracted data from DeltaLake: $path")
     df
   }
 
