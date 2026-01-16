@@ -8,11 +8,16 @@ import org.slf4j.{Logger, LoggerFactory}
 import org.testcontainers.containers.{GenericContainer, PostgreSQLContainer}
 import org.testcontainers.utility.DockerImageName
 
+import java.net.Socket
+import scala.util.{Try, Using}
+
 /**
  * Base class for integration tests with Testcontainers support.
  *
  * Implements Sprint 1-2 Task 1.2: Integration Testing Suite.
  * Provides shared infrastructure for E2E pipeline tests.
+ *
+ * First attempts to use docker-compose services, then falls back to Testcontainers.
  */
 trait IntegrationTestBase extends AnyFlatSpec with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
 
@@ -21,9 +26,29 @@ trait IntegrationTestBase extends AnyFlatSpec with Matchers with BeforeAndAfterA
   // Spark session for tests
   protected var spark: SparkSession = _
 
-  // Testcontainers
+  // Testcontainers (used as fallback)
   protected var postgresContainer: PostgreSQLContainer[_] = _
   protected var vaultContainer: GenericContainer[_]       = _
+
+  // Docker-compose service configuration
+  protected var useDockerCompose: Boolean              = false
+  protected var dockerComposePostgresHost: String      = "localhost"
+  protected var dockerComposePostgresPort: Int         = 5432
+  protected var dockerComposePostgresDb: String        = "pipelinedb"
+  protected var dockerComposePostgresUser: String      = "pipelineuser"
+  protected var dockerComposePostgresPassword: String  = "pipelinepass"
+  protected var dockerComposeVaultHost: String         = "localhost"
+  protected var dockerComposeVaultPort: Int            = 8200
+
+  /**
+   * Checks if a service is running on the given host and port.
+   */
+  private def isServiceRunning(host: String, port: Int): Boolean =
+    Try {
+      Using.resource(new Socket(host, port)) { socket =>
+        socket.isConnected
+      }
+    }.getOrElse(false)
 
   /**
    * Sets up Spark and containers before all tests.
@@ -46,11 +71,25 @@ trait IntegrationTestBase extends AnyFlatSpec with Matchers with BeforeAndAfterA
     spark.sparkContext.setLogLevel("WARN")
     logger.info("SparkSession created")
 
-    // Start Postgres container
-    startPostgresContainer()
+    // First, check if docker-compose services are running
+    if (isServiceRunning(dockerComposePostgresHost, dockerComposePostgresPort)) {
+      logger.info("Docker-compose PostgreSQL service detected, using it for tests")
+      useDockerCompose = true
+    } else {
+      logger.info("Docker-compose services not detected, attempting to start Testcontainers")
+      // Start Postgres container
+      startPostgresContainer()
+    }
 
-    // Start Vault container
-    startVaultContainer()
+    // Check Vault
+    if (isServiceRunning(dockerComposeVaultHost, dockerComposeVaultPort)) {
+      logger.info("Docker-compose Vault service detected, using it for tests")
+      System.setProperty("VAULT_ADDR", s"http://$dockerComposeVaultHost:$dockerComposeVaultPort")
+      System.setProperty("VAULT_TOKEN", "dev-token")
+    } else if (!useDockerCompose) {
+      // Start Vault container only if not using docker-compose
+      startVaultContainer()
+    }
 
     logger.info("Integration test environment ready")
   }
@@ -192,20 +231,62 @@ trait IntegrationTestBase extends AnyFlatSpec with Matchers with BeforeAndAfterA
   }
 
   /**
+   * Checks if PostgreSQL is available and skips test if not.
+   */
+  protected def requirePostgres(): Unit =
+    assume(
+      isPostgresAvailable,
+      "PostgreSQL is required for this test but is not running",
+    )
+
+  /**
+   * Checks if PostgreSQL is available (either docker-compose or Testcontainers).
+   */
+  protected def isPostgresAvailable: Boolean =
+    useDockerCompose || (postgresContainer != null && postgresContainer.isRunning)
+
+  /**
+   * Checks if Vault container is available and skips test if not.
+   */
+  protected def requireVault(): Unit =
+    assume(
+      isVaultAvailable,
+      "Vault is required for this test but is not running",
+    )
+
+  /**
+   * Checks if Vault is available (either docker-compose or Testcontainers).
+   */
+  protected def isVaultAvailable: Boolean =
+    isServiceRunning(dockerComposeVaultHost, dockerComposeVaultPort) ||
+      (vaultContainer != null && vaultContainer.isRunning)
+
+  /**
    * Gets PostgreSQL JDBC URL for tests.
    */
-  protected def getPostgresJdbcUrl: String =
-    if (postgresContainer != null && postgresContainer.isRunning) {
-      postgresContainer.getJdbcUrl
+  protected def getPostgresJdbcUrl: String = {
+    requirePostgres()
+    if (useDockerCompose) {
+      s"jdbc:postgresql://$dockerComposePostgresHost:$dockerComposePostgresPort/$dockerComposePostgresDb"
     } else {
-      throw new IllegalStateException("PostgreSQL container is not running")
+      postgresContainer.getJdbcUrl
     }
+  }
 
   /**
    * Gets PostgreSQL connection properties.
    */
-  protected def getPostgresProperties: Map[String, Any] =
-    if (postgresContainer != null && postgresContainer.isRunning) {
+  protected def getPostgresProperties: Map[String, Any] = {
+    requirePostgres()
+    if (useDockerCompose) {
+      Map(
+        "host"     -> dockerComposePostgresHost,
+        "port"     -> dockerComposePostgresPort.toString,
+        "database" -> dockerComposePostgresDb,
+        "username" -> dockerComposePostgresUser,
+        "password" -> dockerComposePostgresPassword,
+      )
+    } else {
       Map(
         "host"     -> postgresContainer.getHost,
         "port"     -> postgresContainer.getMappedPort(5432).toString,
@@ -213,19 +294,20 @@ trait IntegrationTestBase extends AnyFlatSpec with Matchers with BeforeAndAfterA
         "username" -> postgresContainer.getUsername,
         "password" -> postgresContainer.getPassword,
       )
-    } else {
-      throw new IllegalStateException("PostgreSQL container is not running")
     }
+  }
 
   /**
    * Gets Vault address for tests.
    */
-  protected def getVaultAddress: String =
-    if (vaultContainer != null && vaultContainer.isRunning) {
-      s"http://${vaultContainer.getHost}:${vaultContainer.getMappedPort(8200)}"
+  protected def getVaultAddress: String = {
+    requireVault()
+    if (isServiceRunning(dockerComposeVaultHost, dockerComposeVaultPort)) {
+      s"http://$dockerComposeVaultHost:$dockerComposeVaultPort"
     } else {
-      throw new IllegalStateException("Vault container is not running")
+      s"http://${vaultContainer.getHost}:${vaultContainer.getMappedPort(8200)}"
     }
+  }
 
   /**
    * Gets Vault token for tests.
@@ -233,16 +315,28 @@ trait IntegrationTestBase extends AnyFlatSpec with Matchers with BeforeAndAfterA
   protected def getVaultToken: String = "dev-token"
 
   /**
+   * Gets PostgreSQL username for connection.
+   */
+  protected def getPostgresUsername: String =
+    if (useDockerCompose) dockerComposePostgresUser else postgresContainer.getUsername
+
+  /**
+   * Gets PostgreSQL password for connection.
+   */
+  protected def getPostgresPassword: String =
+    if (useDockerCompose) dockerComposePostgresPassword else postgresContainer.getPassword
+
+  /**
    * Creates a test table in PostgreSQL.
    */
   protected def createTestTable(tableName: String, schema: String): Unit =
-    if (postgresContainer != null && postgresContainer.isRunning) {
+    if (isPostgresAvailable) {
       import java.sql.DriverManager
 
       val connection = DriverManager.getConnection(
         getPostgresJdbcUrl,
-        postgresContainer.getUsername,
-        postgresContainer.getPassword,
+        getPostgresUsername,
+        getPostgresPassword,
       )
 
       try {
@@ -257,13 +351,13 @@ trait IntegrationTestBase extends AnyFlatSpec with Matchers with BeforeAndAfterA
    * Inserts test data into PostgreSQL.
    */
   protected def insertTestData(tableName: String, data: Seq[Map[String, Any]]): Unit =
-    if (postgresContainer != null && postgresContainer.isRunning && data.nonEmpty) {
+    if (isPostgresAvailable && data.nonEmpty) {
       import java.sql.DriverManager
 
       val connection = DriverManager.getConnection(
         getPostgresJdbcUrl,
-        postgresContainer.getUsername,
-        postgresContainer.getPassword,
+        getPostgresUsername,
+        getPostgresPassword,
       )
 
       try {
@@ -289,7 +383,7 @@ trait IntegrationTestBase extends AnyFlatSpec with Matchers with BeforeAndAfterA
    * Stores a secret in Vault for testing.
    */
   protected def storeVaultSecret(path: String, data: Map[String, Any]): Unit =
-    if (vaultContainer != null && vaultContainer.isRunning) {
+    if (isVaultAvailable) {
       import com.pipeline.credentials.VaultClient
 
       val vaultClient = VaultClient(getVaultAddress, getVaultToken)
