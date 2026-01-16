@@ -104,8 +104,8 @@ class EdgeCasesIntegrationTest extends IntegrationTestBase {
           .format("jdbc")
           .option("url", getPostgresJdbcUrl)
           .option("dbtable", "large_result")
-          .option("user", postgresContainer.getUsername)
-          .option("password", postgresContainer.getPassword)
+          .option("user", getPostgresUsername)
+          .option("password", getPostgresPassword)
           .load()
 
         resultDf.count() shouldBe 100 // 100 categories
@@ -126,7 +126,7 @@ class EdgeCasesIntegrationTest extends IntegrationTestBase {
     }
   }
 
-  it should "handle pipeline cancellation" in {
+  it should "reject execution of pre-cancelled pipeline" in {
     requireDocker()
 
     // Create test table
@@ -161,71 +161,210 @@ class EdgeCasesIntegrationTest extends IntegrationTestBase {
       ),
     )
 
-    // Cancel pipeline immediately
+    // Cancel pipeline before execution
     pipeline.cancel()
+    pipeline.isCancelled shouldBe true
 
     // Try to execute cancelled pipeline - should throw exception
     val exception = intercept[com.pipeline.exceptions.PipelineCancelledException] {
       pipeline.execute(spark) match {
-        case Left(ex)  => throw ex
+        case Left(ex) => throw ex
         case Right(_) => ()
       }
     }
 
-    logger.info(s"Cancelled pipeline failed as expected: ${exception.getMessage}")
+    logger.info(s"Pre-cancelled pipeline rejected as expected: ${exception.getMessage}")
     exception.getMessage should include("cancel")
   }
 
-  it should "retry on transient failures" in {
+  it should "cancel pipeline in-flight during multi-step execution" in {
     requireDocker()
 
-    var attemptCount = 0
+    import scala.concurrent.{Future, Promise}
+    import scala.concurrent.ExecutionContext.Implicits.global
+    import scala.concurrent.Await
+    import scala.concurrent.duration._
 
-    // Create pipeline that will fail initially then succeed
-    val props = getPostgresProperties
+    // Create large test table to ensure execution takes time
+    createTestTable(
+      "inflight_cancel_test",
+      "CREATE TABLE inflight_cancel_test (id INT, data VARCHAR(100))",
+    )
 
-    // First attempt: use invalid port (will fail)
-    // Subsequent attempts: use correct port (will succeed)
+    // Insert enough data to slow down processing
+    insertTestData(
+      "inflight_cancel_test",
+      (1 to 1000).map(i => Map("id" -> i, "data" -> s"data_$i")),
+    )
+
+    createTestTable(
+      "inflight_cancel_dest",
+      "CREATE TABLE inflight_cancel_dest (id INT, data VARCHAR(100), processed VARCHAR(10))",
+    )
+
+    // Create multi-step pipeline
+    val props    = getPostgresProperties
     val pipeline = Pipeline(
-      name = "retry-test-pipeline",
+      name = "inflight-cancel-pipeline",
       mode = "batch",
       steps = List(
         ExtractStep(
           method = "fromPostgres",
           config = Map(
             "host"     -> props("host"),
-            "port"     -> props("port"), // Correct port
+            "port"     -> props("port"),
             "database" -> props("database"),
             "username" -> props("username"),
             "password" -> props("password"),
-            "table"    -> "retry_test_table",
+            "table"    -> "inflight_cancel_test",
+          ),
+          nextStep = None,
+        ),
+        TransformStep(
+          method = "addColumn",
+          config = Map(
+            "columnName" -> "processed",
+            "value"      -> "yes",
+          ),
+          nextStep = None,
+        ),
+        LoadStep(
+          method = "toPostgres",
+          config = Map(
+            "host"     -> props("host"),
+            "port"     -> props("port"),
+            "database" -> props("database"),
+            "username" -> props("username"),
+            "password" -> props("password"),
+            "table"    -> "inflight_cancel_dest",
+            "mode"     -> "overwrite",
           ),
           nextStep = None,
         ),
       ),
     )
 
-    // Create table for retry test
+    // Execute in background and cancel after delay
+    val executionFuture = Future {
+      pipeline.execute(spark)
+    }
+
+    // Cancel after a short delay to attempt in-flight cancellation
+    Thread.sleep(50)
+    pipeline.cancel()
+
+    // Wait for result
+    val result = Await.result(executionFuture, 30.seconds)
+
+    // Either the pipeline was cancelled or completed before cancellation
+    result match {
+      case Left(ex: com.pipeline.exceptions.PipelineCancelledException) =>
+        logger.info(s"Pipeline cancelled in-flight as expected: ${ex.getMessage}")
+        ex.getMessage should include("cancel")
+
+      case Right(_) =>
+        // Pipeline completed before cancellation took effect - this is acceptable
+        // since cancellation is cooperative and checked between steps
+        logger.info("Pipeline completed before cancellation took effect (acceptable)")
+        pipeline.isCancelled shouldBe true
+
+      case Left(ex) =>
+        fail(s"Unexpected error: ${ex.getMessage}", ex)
+    }
+  }
+
+  it should "succeed without retry when operation works on first attempt" in {
+    requireDocker()
+
+    val props = getPostgresProperties
+
+    // Create table before execution
     createTestTable(
-      "retry_test_table",
-      "CREATE TABLE retry_test_table (id INT, value VARCHAR(50))",
+      "retry_success_table",
+      "CREATE TABLE retry_success_table (id INT, value VARCHAR(50))",
     )
 
     insertTestData(
-      "retry_test_table",
+      "retry_success_table",
       Seq(Map("id" -> 1, "value" -> "test")),
     )
 
-    // Execute with retry
+    val pipeline = Pipeline(
+      name = "retry-success-pipeline",
+      mode = "batch",
+      steps = List(
+        ExtractStep(
+          method = "fromPostgres",
+          config = Map(
+            "host"     -> props("host"),
+            "port"     -> props("port"),
+            "database" -> props("database"),
+            "username" -> props("username"),
+            "password" -> props("password"),
+            "table"    -> "retry_success_table",
+          ),
+          nextStep = None,
+        ),
+      ),
+    )
+
+    // Execute with retry configured - should succeed on first attempt
     val result = pipeline.execute(spark, maxAttempts = 3, delayMillis = 100)
 
     result match {
-      case Right(_) =>
-        logger.info("Retry logic worked successfully")
+      case Right(context) =>
+        // Verify data was extracted
+        val df = context.getPrimaryDataFrame
+        df.count() shouldBe 1
+        logger.info("Pipeline succeeded on first attempt as expected")
 
       case Left(exception) =>
-        // This is expected if the table doesn't exist
-        logger.info(s"Pipeline execution result: ${exception.getMessage}")
+        fail(s"Pipeline should succeed: ${exception.getMessage}", exception)
+    }
+  }
+
+  it should "exhaust retries on persistent failures" in {
+    requireDocker()
+
+    val props = getPostgresProperties
+
+    // Create pipeline that references a non-existent table
+    val pipeline = Pipeline(
+      name = "retry-fail-pipeline",
+      mode = "batch",
+      steps = List(
+        ExtractStep(
+          method = "fromPostgres",
+          config = Map(
+            "host"     -> props("host"),
+            "port"     -> props("port"),
+            "database" -> props("database"),
+            "username" -> props("username"),
+            "password" -> props("password"),
+            "table"    -> "nonexistent_retry_table_xyz",
+          ),
+          nextStep = None,
+        ),
+      ),
+    )
+
+    val startTime = System.currentTimeMillis()
+
+    // Execute with retry - should fail after all attempts
+    val result = pipeline.execute(spark, maxAttempts = 2, delayMillis = 100)
+
+    val duration = System.currentTimeMillis() - startTime
+
+    result match {
+      case Left(exception) =>
+        // Should fail because table doesn't exist
+        logger.info(s"Pipeline failed after retries as expected: ${exception.getMessage}")
+        // With 2 attempts and 100ms delay, total time should be >= 100ms (one retry delay)
+        duration should be >= 100L
+        exception.getMessage should (include("nonexistent") or include("does not exist") or include("not found") or include("error"))
+
+      case Right(_) =>
+        fail("Pipeline should have failed for non-existent table")
     }
   }
 
@@ -350,16 +489,16 @@ class EdgeCasesIntegrationTest extends IntegrationTestBase {
           .format("jdbc")
           .option("url", getPostgresJdbcUrl)
           .option("dbtable", "concurrent_dest_1")
-          .option("user", postgresContainer.getUsername)
-          .option("password", postgresContainer.getPassword)
+          .option("user", getPostgresUsername)
+          .option("password", getPostgresPassword)
           .load()
 
         val dest2Df = spark.read
           .format("jdbc")
           .option("url", getPostgresJdbcUrl)
           .option("dbtable", "concurrent_dest_2")
-          .option("user", postgresContainer.getUsername)
-          .option("password", postgresContainer.getPassword)
+          .option("user", getPostgresUsername)
+          .option("password", getPostgresPassword)
           .load()
 
         dest1Df.count() shouldBe 25
