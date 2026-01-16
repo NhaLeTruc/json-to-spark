@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL Database
   postgres:
@@ -101,14 +99,13 @@ services:
     cap_add:
       - IPC_LOCK
     volumes:
-      - ./docker/vault/config.hcl:/vault/config/config.hcl
       - ./docker/vault/init-vault.sh:/vault/init-vault.sh
       - vault_data:/vault/file
     command: server -dev -dev-root-token-id=${VAULT_TOKEN:-dev-token}
     networks:
       - pipeline-network
     healthcheck:
-      test: ["CMD", "vault", "status"]
+      test: ["CMD", "sh", "-c", "VAULT_ADDR=http://127.0.0.1:8200 vault status"]
       interval: 10s
       timeout: 5s
       retries: 5

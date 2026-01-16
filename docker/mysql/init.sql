@@ -125,5 +125,4 @@ SELECT
     (SELECT COUNT(*) FROM customers) AS total_customers,
     (SELECT COUNT(*) FROM transactions) AS total_transactions,
     (SELECT COUNT(*) FROM product_inventory) AS total_products,
-    (SELECT COUNT(*) FROM sales_metrics) AS total_metrics
-AS initialization_summary;
+    (SELECT COUNT(*) FROM sales_metrics) AS total_metrics;
