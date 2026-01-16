@@ -111,8 +111,8 @@ class TransformOperationsIntegrationTest extends IntegrationTestBase {
           .format("jdbc")
           .option("url", getPostgresJdbcUrl)
           .option("dbtable", "sales_summary")
-          .option("user", postgresContainer.getUsername)
-          .option("password", postgresContainer.getPassword)
+          .option("user", getPostgresUsername)
+          .option("password", getPostgresPassword)
           .load()
 
         resultDf.count() shouldBe 2 // Two product categories
@@ -262,8 +262,8 @@ class TransformOperationsIntegrationTest extends IntegrationTestBase {
           .format("jdbc")
           .option("url", getPostgresJdbcUrl)
           .option("dbtable", "user_orders")
-          .option("user", postgresContainer.getUsername)
-          .option("password", postgresContainer.getPassword)
+          .option("user", getPostgresUsername)
+          .option("password", getPostgresPassword)
           .load()
 
         resultDf.count() shouldBe 3 // Three orders
@@ -385,8 +385,8 @@ class TransformOperationsIntegrationTest extends IntegrationTestBase {
           .format("jdbc")
           .option("url", getPostgresJdbcUrl)
           .option("dbtable", "union_result")
-          .option("user", postgresContainer.getUsername)
-          .option("password", postgresContainer.getPassword)
+          .option("user", getPostgresUsername)
+          .option("password", getPostgresPassword)
           .load()
 
         // Union includes primary DataFrame (df3 from last extract) plus all input DataFrames

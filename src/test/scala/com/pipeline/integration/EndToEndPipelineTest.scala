@@ -129,8 +129,8 @@ class EndToEndPipelineTest extends IntegrationTestBase {
           .format("jdbc")
           .option("url", getPostgresJdbcUrl)
           .option("dbtable", "users_processed")
-          .option("user", postgresContainer.getUsername)
-          .option("password", postgresContainer.getPassword)
+          .option("user", getPostgresUsername)
+          .option("password", getPostgresPassword)
           .load()
 
         resultDf.count() shouldBe 3                          // Only active users
