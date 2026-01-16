@@ -46,7 +46,7 @@ ext {
     vaultVersion = '5.1.0'
     jacksonVersion = '2.15.3'
     scalatestVersion = '3.2.17'
-    testcontainersVersion = '1.19.3'
+    testcontainersVersion = '1.20.4'
     mockitoVersion = '5.7.0'
     slf4jVersion = '2.0.9'
     logbackVersion = '1.4.11'
@@ -102,6 +102,10 @@ dependencies {
     testImplementation "org.testcontainers:postgresql:${testcontainersVersion}"
     testImplementation "org.testcontainers:mysql:${testcontainersVersion}"
     testImplementation "org.testcontainers:kafka:${testcontainersVersion}"
+    // Force newer docker-java to support Docker API 1.44+
+    testImplementation("com.github.docker-java:docker-java-api:3.4.1")
+    testImplementation("com.github.docker-java:docker-java-transport-zerodep:3.4.1")
+    testImplementation("com.github.docker-java:docker-java-transport-httpclient5:3.4.1")
     testImplementation "org.mockito:mockito-core:${mockitoVersion}"
     testRuntimeOnly "org.scala-lang.modules:scala-xml_${scalaVersion}:2.1.0"
     testRuntimeOnly "org.junit.vintage:junit-vintage-engine:5.10.0"
@@ -226,6 +230,9 @@ test {
 
     // Separate test tasks can be defined for integration/performance tests
     systemProperty 'test.env', 'local'
+
+    // Set Docker API version for Testcontainers compatibility
+    environment 'DOCKER_API_VERSION', '1.44'
 }
 
 // Task to run only unit tests
