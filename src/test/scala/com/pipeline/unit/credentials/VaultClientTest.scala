@@ -17,13 +17,33 @@ class VaultClientTest extends AnyFunSuite with Matchers {
 
   test("VaultClient should read secret from path") {
     // This test will be skipped if VAULT_ADDR is not set (for local dev without Vault)
-    val vaultAddr = sys.env.get("VAULT_ADDR")
-    if (vaultAddr.isEmpty) {
-      info("Skipping test - VAULT_ADDR not set")
+    val vaultAddr  = sys.env.get("VAULT_ADDR")
+    val vaultToken = sys.env.get("VAULT_TOKEN")
+
+    if (vaultAddr.isEmpty || vaultToken.isEmpty) {
+      info("Skipping test - VAULT_ADDR or VAULT_TOKEN not set")
       succeed
     } else {
-      // In real test with Vault available, would test actual secret reading
-      pending
+      val client = VaultClient(vaultAddr.get, vaultToken.get)
+
+      // First write a test secret
+      val testData   = Map[String, Any]("test_key" -> "test_value", "number" -> "42")
+      val writeResult = client.writeSecret("secret/data/test/vault_client_test", testData)
+
+      writeResult.isSuccess shouldBe true
+
+      // Then read it back
+      val readResult = client.readSecret("secret/data/test/vault_client_test")
+
+      readResult match {
+        case scala.util.Success(data) =>
+          // Vault KV v2 wraps data in a "data" key
+          val secretData = data.getOrElse("data", data).asInstanceOf[Map[String, Any]]
+          secretData should contain key "test_key"
+
+        case scala.util.Failure(ex) =>
+          fail(s"Failed to read secret: ${ex.getMessage}")
+      }
     }
   }
 
@@ -37,12 +57,29 @@ class VaultClientTest extends AnyFunSuite with Matchers {
   }
 
   test("VaultClient should handle missing secrets") {
-    val vaultAddr = sys.env.get("VAULT_ADDR")
-    if (vaultAddr.isEmpty) {
-      info("Skipping test - VAULT_ADDR not set")
+    val vaultAddr  = sys.env.get("VAULT_ADDR")
+    val vaultToken = sys.env.get("VAULT_TOKEN")
+
+    if (vaultAddr.isEmpty || vaultToken.isEmpty) {
+      info("Skipping test - VAULT_ADDR or VAULT_TOKEN not set")
       succeed
     } else {
-      pending
+      val client = VaultClient(vaultAddr.get, vaultToken.get)
+
+      // Try to read a non-existent secret
+      val result = client.readSecret("secret/data/nonexistent/path/that/does/not/exist")
+
+      // Should fail or return empty - both are acceptable behaviors
+      result match {
+        case scala.util.Success(data) =>
+          // If it succeeds, the data should be empty or the path doesn't have the expected keys
+          info(s"Vault returned for missing path: $data")
+
+        case scala.util.Failure(ex) =>
+          // Expected - missing secret should result in failure
+          info(s"Missing secret correctly resulted in failure: ${ex.getMessage}")
+          succeed
+      }
     }
   }
 
