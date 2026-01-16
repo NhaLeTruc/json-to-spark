@@ -119,8 +119,12 @@ class LatencyPerformanceTest extends PerformanceTestBase {
     logger.info(s"  p50: ${p50}ms")
     logger.info(s"  p95: ${p95}ms")
 
-    // p95 should be within 2x of p50 for consistent performance
-    p95 should be < (p50 * 2)
+    // p95 should be within 1.5x of p50 for consistent filter performance
+    // Filter is a simple operation and should have low variance
+    val p95_to_p50_ratio = if (p50 > 0) p95.toDouble / p50 else 1.0
+    logger.info(f"  p95/p50 ratio: $p95_to_p50_ratio%.2f")
+
+    p95_to_p50_ratio should be < 1.5
   }
 
   it should "measure aggregation latency with consistent p95" in {
