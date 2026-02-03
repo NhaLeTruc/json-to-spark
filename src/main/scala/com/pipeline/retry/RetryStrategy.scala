@@ -51,7 +51,8 @@ object RetryStrategy {
             s"Retrying in ${delayMillis}ms...",
         )
 
-        // Wait before retry
+        // Note: Thread.sleep is used for simplicity. For high-concurrency scenarios,
+        // consider using ScheduledExecutorService or Scala Futures with delay.
         Thread.sleep(delayMillis)
 
         // Tail recursive call
@@ -124,7 +125,8 @@ object RetryStrategy {
             s"Retrying in ${delayMillis}ms...",
         )
 
-        // Wait before retry
+        // Note: Thread.sleep is used for simplicity. For high-concurrency scenarios,
+        // consider using ScheduledExecutorService or Scala Futures with delay.
         Thread.sleep(delayMillis)
 
         // Tail recursive call

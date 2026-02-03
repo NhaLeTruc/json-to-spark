@@ -4,6 +4,8 @@ import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.slf4j.{Logger, LoggerFactory}
 import com.pipeline.avro.AvroConverter
 
+import scala.reflect.ClassTag
+
 /**
  * User-facing transformation methods.
  *
@@ -15,6 +17,15 @@ import com.pipeline.avro.AvroConverter
 object UserMethods {
 
   private val logger: Logger = LoggerFactory.getLogger(getClass)
+
+  private def getAs[T](config: Map[String, Any], key: String)(implicit ct: ClassTag[T]): T =
+    config.get(key) match {
+      case Some(value: T) => value
+      case Some(other) => throw new IllegalArgumentException(
+        s"Config key '$key' expected ${ct.runtimeClass.getSimpleName} but got ${other.getClass.getSimpleName}"
+      )
+      case None => throw new IllegalArgumentException(s"Config key '$key' is required")
+    }
 
   // ==================== TRANSFORM METHODS ====================
 
@@ -32,6 +43,11 @@ object UserMethods {
     require(config.contains("condition"), "'condition' is required")
 
     val condition = config("condition").toString
+
+    // Validate condition doesn't contain dangerous patterns
+    require(!condition.toLowerCase.contains("--"), "SQL comments not allowed in conditions")
+    require(!condition.contains(";"), "Multiple statements not allowed")
+
     df.filter(condition)
   }
 
@@ -48,7 +64,7 @@ object UserMethods {
 
     require(config.contains("columns"), "'columns' map is required")
 
-    val columns = config("columns").asInstanceOf[Map[String, String]]
+    val columns = getAs[Map[String, String]](config, "columns")
 
     import org.apache.spark.sql.functions.expr
 
@@ -72,10 +88,10 @@ object UserMethods {
     require(config.contains("joinConditions"), "'joinConditions' list is required")
     require(config.contains("resolvedDataFrames"), "DataFrames must be resolved by TransformStep")
 
-    val inputDfNames   = config("inputDataFrames").asInstanceOf[List[String]]
-    val joinConditions = config("joinConditions").asInstanceOf[List[String]]
+    val inputDfNames   = getAs[List[String]](config, "inputDataFrames")
+    val joinConditions = getAs[List[String]](config, "joinConditions")
     val joinType       = config.getOrElse("joinType", "inner").toString
-    val resolvedDFs    = config("resolvedDataFrames").asInstanceOf[Map[String, DataFrame]]
+    val resolvedDFs    = getAs[Map[String, DataFrame]](config, "resolvedDataFrames")
 
     require(inputDfNames.size >= 2, "At least 2 DataFrames required for join")
     require(joinConditions.size == inputDfNames.size - 1, "Need N-1 join conditions for N DataFrames")
@@ -132,8 +148,8 @@ object UserMethods {
     require(config.contains("groupBy"), "'groupBy' columns are required")
     require(config.contains("aggregations"), "'aggregations' map is required")
 
-    val groupByCols  = config("groupBy").asInstanceOf[List[String]]
-    val aggregations = config("aggregations").asInstanceOf[Map[String, String]]
+    val groupByCols  = getAs[List[String]](config, "groupBy")
+    val aggregations = getAs[Map[String, String]](config, "aggregations")
 
     import org.apache.spark.sql.functions._
 
@@ -174,7 +190,7 @@ object UserMethods {
         require(config.contains("groupByColumns"), "'groupByColumns' is required for pivot")
 
         val pivotCol    = config("pivotColumn").toString
-        val groupByCols = config("groupByColumns").asInstanceOf[List[String]]
+        val groupByCols = getAs[List[String]](config, "groupByColumns")
         val aggColumn   = config.get("aggregateColumn").map(_.toString)
 
         import org.apache.spark.sql.functions._
@@ -192,12 +208,16 @@ object UserMethods {
         require(config.contains("variableColName"), "'variableColName' is required for unpivot")
         require(config.contains("valueColName"), "'valueColName' is required for unpivot")
 
-        val valueCols       = config("valueCols").asInstanceOf[List[String]]
+        val valueCols       = getAs[List[String]](config, "valueCols")
         val variableColName = config("variableColName").toString
         val valueColName    = config("valueColName").toString
         val idCols          = config
           .get("idCols")
-          .map(_.asInstanceOf[List[String]])
+          .map(v => v match {
+            case list: List[_] => list.map(_.toString)
+            case other => throw new IllegalArgumentException(
+              s"Config key 'idCols' expected List but got ${other.getClass.getSimpleName}")
+          })
           .getOrElse(
             df.columns.filterNot(valueCols.contains).toList,
           )
@@ -236,9 +256,9 @@ object UserMethods {
     require(config.contains("inputDataFrames"), "'inputDataFrames' list is required")
     require(config.contains("resolvedDataFrames"), "DataFrames must be resolved by TransformStep")
 
-    val inputDfNames = config("inputDataFrames").asInstanceOf[List[String]]
+    val inputDfNames = getAs[List[String]](config, "inputDataFrames")
     val distinct     = config.getOrElse("distinct", false).asInstanceOf[Boolean]
-    val resolvedDFs  = config("resolvedDataFrames").asInstanceOf[Map[String, DataFrame]]
+    val resolvedDFs  = getAs[Map[String, DataFrame]](config, "resolvedDataFrames")
 
     // Get DataFrames to union
     val dataFrames = inputDfNames.map { name =>
@@ -280,7 +300,7 @@ object UserMethods {
 
     require(config.contains("expectedColumns"), "'expectedColumns' is required")
 
-    val expectedColumns = config("expectedColumns").asInstanceOf[List[Map[String, String]]]
+    val expectedColumns = getAs[List[Map[String, String]]](config, "expectedColumns")
     val actualSchema    = df.schema
 
     expectedColumns.foreach { colSpec =>
@@ -315,7 +335,7 @@ object UserMethods {
 
     require(config.contains("notNullColumns"), "'notNullColumns' list is required")
 
-    val notNullColumns = config("notNullColumns").asInstanceOf[List[String]]
+    val notNullColumns = getAs[List[String]](config, "notNullColumns")
 
     import org.apache.spark.sql.functions._
 
@@ -344,7 +364,7 @@ object UserMethods {
 
     require(config.contains("ranges"), "'ranges' map is required")
 
-    val ranges = config("ranges").asInstanceOf[Map[String, Map[String, Any]]]
+    val ranges = getAs[Map[String, Map[String, Any]]](config, "ranges")
 
     import org.apache.spark.sql.functions._
 
@@ -437,9 +457,13 @@ object UserMethods {
 
     require(config.contains("rules"), "'rules' list is required")
 
-    val rules = config("rules").asInstanceOf[List[String]]
+    val rules = getAs[List[String]](config, "rules")
 
     rules.zipWithIndex.foreach { case (rule, index) =>
+      // Validate rule doesn't contain dangerous patterns
+      require(!rule.toLowerCase.contains("--"), s"SQL comments not allowed in rule #${index + 1}")
+      require(!rule.contains(";"), s"Multiple statements not allowed in rule #${index + 1}")
+
       val violationCount = df.filter(s"NOT ($rule)").count()
       if (violationCount > 0) {
         throw new IllegalStateException(

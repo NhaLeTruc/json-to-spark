@@ -88,7 +88,7 @@ object AvroConverter {
     }
 
     val df = finalReader.load(path)
-    logger.info(s"Successfully read ${df.count()} rows from Avro at: $path")
+    logger.info(s"Successfully read Avro data from: $path")
     df
   }
 
@@ -163,7 +163,7 @@ object AvroConverter {
       // Reader can have fewer fields (forward compatibility)
       // Reader can have additional fields with defaults (backward compatibility)
 
-      import scala.collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
 
       val writerFieldNames = writerFields.asScala.map(_.name()).toSet
       val readerFieldNames = readerFields.asScala.map(_.name()).toSet
@@ -199,7 +199,7 @@ object AvroConverter {
 
     val targetAvroSchema = new Schema.Parser().parse(targetSchema)
 
-    import scala.collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
     import org.apache.spark.sql.functions._
     import org.apache.spark.sql.types._
 
@@ -228,6 +228,9 @@ object AvroConverter {
       logger.info(s"Removing extra columns: ${removed.mkString(", ")}")
     }
 
+    if (columnsToKeep.isEmpty) {
+      throw new IllegalArgumentException("No columns match target schema")
+    }
     evolvedDf.select(columnsToKeep.head, columnsToKeep.tail: _*)
   }
 
@@ -251,7 +254,7 @@ object AvroConverter {
       case Schema.Type.NULL    => NullType
       case Schema.Type.UNION   =>
         // Handle nullable types (union of [null, type])
-        import scala.collection.JavaConverters._
+        import scala.jdk.CollectionConverters._
         val types = avroSchema.getTypes.asScala
         types.find(_.getType != Schema.Type.NULL) match {
           case Some(nonNullType) => avroTypeToSparkType(nonNullType)

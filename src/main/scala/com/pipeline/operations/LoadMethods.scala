@@ -2,7 +2,7 @@ package com.pipeline.operations
 
 import org.apache.spark.sql.{DataFrame, SaveMode, SparkSession}
 import org.slf4j.{Logger, LoggerFactory}
-import com.pipeline.credentials.{CredentialConfigFactory, IAMConfig, JdbcConfig, OtherConfig, VaultClient}
+import com.pipeline.credentials.{CredentialConfigFactory, CredentialResolver, IAMConfig, JdbcConfig, OtherConfig, VaultClient}
 import com.pipeline.avro.AvroConverter
 import scala.util.{Failure, Success}
 
@@ -51,7 +51,7 @@ object LoadMethods {
     }
 
     finalWriter.save()
-    logger.info(s"Loaded ${df.count()} rows to PostgreSQL table ${config("table")}")
+    logger.info(s"Loaded data to PostgreSQL table ${config("table")}")
   }
 
   /**
@@ -88,7 +88,7 @@ object LoadMethods {
     }
 
     finalWriter.save()
-    logger.info(s"Loaded ${df.count()} rows to MySQL table ${config("table")}")
+    logger.info(s"Loaded data to MySQL table ${config("table")}")
   }
 
   /**
@@ -316,73 +316,14 @@ object LoadMethods {
     }
   }
 
-  /**
-   * Resolves JDBC credentials from Vault or config.
-   */
   private def resolveJdbcCredentials(config: Map[String, Any], credentialType: String): JdbcConfig =
-    config.get("credentialPath") match {
-      case Some(path) =>
-        val vaultClient = VaultClient.fromEnv()
-        vaultClient.readSecret(path.toString) match {
-          case Success(data) =>
-            CredentialConfigFactory.create(credentialType, data).asInstanceOf[JdbcConfig]
-          case Failure(ex)   =>
-            throw new RuntimeException(s"Failed to read credentials from Vault: ${ex.getMessage}", ex)
-        }
-      case None       =>
-        // Fallback to credentials in config (not recommended for production)
-        logger.warn("Using credentials from config file - not recommended for production")
-        JdbcConfig(
-          host = config.getOrElse("host", "localhost").toString,
-          port = config.getOrElse("port", if (credentialType == "postgres") 5432 else 3306).toString.toInt,
-          database = config.getOrElse("database", "").toString,
-          username = config.getOrElse("username", "").toString,
-          password = config.getOrElse("password", "").toString,
-          credentialType = credentialType,
-          properties = config.getOrElse("properties", Map.empty[String, String]).asInstanceOf[Map[String, String]],
-        )
-    }
+    CredentialResolver.resolveJdbcCredentials(config, credentialType)
 
-  /**
-   * Resolves S3/IAM credentials from Vault or config.
-   */
   private def resolveS3Credentials(config: Map[String, Any]): IAMConfig =
-    config.get("credentialPath") match {
-      case Some(path) =>
-        val vaultClient = VaultClient.fromEnv()
-        vaultClient.readSecret(path.toString) match {
-          case Success(data) =>
-            CredentialConfigFactory.create("iam", data).asInstanceOf[IAMConfig]
-          case Failure(ex)   =>
-            throw new RuntimeException(s"Failed to read S3 credentials from Vault: ${ex.getMessage}", ex)
-        }
-      case None       =>
-        // Fallback to credentials in config (not recommended for production)
-        logger.warn("Using S3 credentials from config file - not recommended for production")
-        IAMConfig(
-          accessKeyId = config.getOrElse("accessKeyId", "").toString,
-          secretAccessKey = config.getOrElse("secretAccessKey", "").toString,
-          sessionToken = config.get("sessionToken").map(_.toString),
-          region = config.getOrElse("region", "us-east-1").toString,
-        )
-    }
+    CredentialResolver.resolveS3Credentials(config)
 
-  /**
-   * Resolves Kafka credentials from Vault or config.
-   */
   private def resolveKafkaCredentials(config: Map[String, Any]): Map[String, Any] =
-    config.get("credentialPath") match {
-      case Some(path) =>
-        val vaultClient = VaultClient.fromEnv()
-        vaultClient.readSecret(path.toString) match {
-          case Success(data) => data
-          case Failure(ex)   =>
-            throw new RuntimeException(s"Failed to read Kafka credentials from Vault: ${ex.getMessage}", ex)
-        }
-      case None       =>
-        // Use Kafka config directly
-        config
-    }
+    CredentialResolver.resolveKafkaCredentials(config)
 
   /**
    * Parses SaveMode from string.

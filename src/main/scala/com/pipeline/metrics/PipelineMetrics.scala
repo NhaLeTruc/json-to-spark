@@ -18,18 +18,18 @@ case class PipelineMetrics(
 
   private val logger: Logger = LoggerFactory.getLogger(getClass)
 
-  var endTime: Option[Long]        = None
-  var status: String               = "RUNNING"
-  var errorMessage: Option[String] = None
+  @volatile var endTime: Option[Long]        = None
+  @volatile var status: String               = "RUNNING"
+  @volatile var errorMessage: Option[String] = None
 
   // Step-level metrics
   private val stepMetrics = mutable.ListBuffer[StepMetrics]()
 
   // Overall metrics
-  var totalRecordsRead: Long    = 0
-  var totalRecordsWritten: Long = 0
-  var totalBytesRead: Long      = 0
-  var totalBytesWritten: Long   = 0
+  @volatile var totalRecordsRead: Long    = 0
+  @volatile var totalRecordsWritten: Long = 0
+  @volatile var totalBytesRead: Long      = 0
+  @volatile var totalBytesWritten: Long   = 0
 
   /**
    * Records the start of a pipeline step.
@@ -171,14 +171,14 @@ case class StepMetrics(
     startTime: Long,
 ) {
 
-  var endTime: Option[Long]        = None
-  var status: String               = "RUNNING"
-  var errorMessage: Option[String] = None
+  @volatile var endTime: Option[Long]        = None
+  @volatile var status: String               = "RUNNING"
+  @volatile var errorMessage: Option[String] = None
 
-  var recordsRead: Long    = 0
-  var recordsWritten: Long = 0
-  var bytesRead: Long      = 0
-  var bytesWritten: Long   = 0
+  @volatile var recordsRead: Long    = 0
+  @volatile var recordsWritten: Long = 0
+  @volatile var bytesRead: Long      = 0
+  @volatile var bytesWritten: Long   = 0
 
   /**
    * Gets the step duration in milliseconds.

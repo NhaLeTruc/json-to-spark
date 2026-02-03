@@ -82,15 +82,14 @@ object PipelineRunner {
             val duration = System.currentTimeMillis() - startTime
             logger.error(s"❌ Pipeline failed after ${duration}ms", error)
             System.exit(1)
-
-          case _ => println("Something unexpected happened")
         }
 
-      } finally
-      // Stop SparkSession
-      if (!isClusterMode) {
-        logger.info("Stopping SparkSession")
-        spark.stop()
+      } finally {
+        // Stop SparkSession
+        if (!isClusterMode) {
+          logger.info("Stopping SparkSession")
+          spark.stop()
+        }
       }
 
     } catch {
@@ -113,10 +112,8 @@ object PipelineRunner {
       .builder()
       .appName("Pipeline Orchestration Application")
 
-    // Configure based on cluster vs local mode
-    if (isClusterMode) {
+    val spark = if (isClusterMode) {
       logger.info("Running in CLUSTER mode - using existing SparkSession")
-      // In cluster mode, spark-submit provides the SparkSession
       builder.getOrCreate()
     } else {
       logger.info("Running in LOCAL mode - creating new SparkSession")
@@ -126,9 +123,6 @@ object PipelineRunner {
         .getOrCreate()
     }
 
-    val spark = builder.getOrCreate()
-
-    // Configure Delta Lake
     spark.sparkContext.setLogLevel("WARN")
 
     logger.info(s"SparkSession created: ${spark.version}")

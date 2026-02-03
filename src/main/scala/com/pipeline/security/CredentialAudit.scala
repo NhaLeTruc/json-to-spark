@@ -62,8 +62,8 @@ object CredentialAudit {
 
   private val logger: Logger = LoggerFactory.getLogger("CredentialAudit")
 
-  // In-memory audit log (for testing/debugging)
-  private val auditLog = scala.collection.mutable.ListBuffer[CredentialAuditEntry]()
+  // In-memory audit log (thread-safe)
+  private val auditLog = new java.util.concurrent.ConcurrentLinkedQueue[CredentialAuditEntry]()
 
   /**
    * Logs a credential access event.
@@ -72,9 +72,7 @@ object CredentialAudit {
    */
   def log(entry: CredentialAuditEntry): Unit = {
     // Add to in-memory log
-    auditLog.synchronized {
-      auditLog += entry
-    }
+    auditLog.add(entry)
 
     // Log via SLF4J with MDC context
     try {
@@ -204,18 +202,16 @@ object CredentialAudit {
    *
    * @return List of audit entries
    */
-  def getAuditLog: List[CredentialAuditEntry] =
-    auditLog.synchronized {
-      auditLog.toList
-    }
+  def getAuditLog: List[CredentialAuditEntry] = {
+    import scala.jdk.CollectionConverters._
+    auditLog.asScala.toList
+  }
 
   /**
    * Clears the audit log (for testing).
    */
   def clearAuditLog(): Unit =
-    auditLog.synchronized {
-      auditLog.clear()
-    }
+    auditLog.clear()
 
   /**
    * Exports audit log to JSON file.

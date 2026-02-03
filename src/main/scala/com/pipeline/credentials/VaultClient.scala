@@ -56,11 +56,11 @@ case class VaultClient(
         )
       }
 
-      val data = response.getData.asScala.toMap
+      val data: Map[String, String] = response.getData.asScala.toMap
 
       logger.info(s"Successfully retrieved secret from Vault: $path")
 
-      data.asInstanceOf[Map[String, Any]]
+      data.map { case (k, v) => k -> (v: Any) }
     }.recoverWith { case ex: Exception =>
       logger.error(s"Error reading secret from Vault at path $path: ${ex.getMessage}", ex)
       Failure(ex)
@@ -142,8 +142,13 @@ object VaultClient {
       token: Option[String] = None,
       namespace: Option[String] = None,
   ): VaultClient = {
-    val finalAddress   = address.orElse(sys.env.get("VAULT_ADDR")).getOrElse("http://localhost:8200")
-    val finalToken     = token.orElse(sys.env.get("VAULT_TOKEN")).getOrElse("")
+    val finalAddress = address.orElse(sys.env.get("VAULT_ADDR")).getOrElse("http://localhost:8200")
+    val finalToken = token
+      .orElse(sys.env.get("VAULT_TOKEN"))
+      .filter(_.nonEmpty)
+      .getOrElse(throw new IllegalStateException(
+        "Vault token not provided and VAULT_TOKEN environment variable is not set"
+      ))
     val finalNamespace = namespace.orElse(sys.env.get("VAULT_NAMESPACE"))
 
     VaultClient(finalAddress, finalToken, finalNamespace)

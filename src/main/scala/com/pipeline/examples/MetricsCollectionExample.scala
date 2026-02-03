@@ -66,19 +66,20 @@ object MetricsCollectionExample {
 
               // 3. Export to JSON (structured format)
               logger.info("\n3. EXPORTING TO JSON:")
-              val jsonOutput = "/tmp/pipeline-metrics.json"
+              val tempDir = System.getProperty("java.io.tmpdir")
+              val jsonOutput = s"$tempDir/pipeline-metrics.json"
               JsonFileExporter.export(metrics, jsonOutput, append = false)
               logger.info(s"Metrics exported to JSON: $jsonOutput")
 
               // 4. Export to JSON Lines (for aggregation)
               logger.info("\n4. EXPORTING TO JSONL (Append Mode):")
-              val jsonlOutput = "/tmp/pipeline-metrics.jsonl"
+              val jsonlOutput = s"$tempDir/pipeline-metrics.jsonl"
               JsonFileExporter.exportToJsonLines(metrics, jsonlOutput)
               logger.info(s"Metrics appended to JSONL: $jsonlOutput")
 
               // 5. Export to Prometheus format
               logger.info("\n5. EXPORTING TO PROMETHEUS FORMAT:")
-              val prometheusOutput = "/tmp/pipeline-metrics.prom"
+              val prometheusOutput = s"$tempDir/pipeline-metrics.prom"
               PrometheusExporter.exportToFile(metrics, prometheusOutput)
               logger.info(s"Metrics exported to Prometheus format: $prometheusOutput")
 
@@ -120,9 +121,10 @@ object MetricsCollectionExample {
             LogExporter.export(metrics)
 
             // Export to file for debugging
+            val tempDir = System.getProperty("java.io.tmpdir")
             JsonFileExporter.export(
               metrics,
-              s"/tmp/pipeline-metrics-failed-${System.currentTimeMillis()}.json",
+              s"$tempDir/pipeline-metrics-failed-${System.currentTimeMillis()}.json",
             )
           }
       }

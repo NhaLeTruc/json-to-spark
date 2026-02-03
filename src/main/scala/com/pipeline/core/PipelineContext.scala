@@ -6,8 +6,6 @@ import org.apache.spark.sql.streaming.StreamingQuery
 import org.apache.spark.storage.StorageLevel
 import org.slf4j.{Logger, LoggerFactory}
 
-import scala.collection.mutable
-
 /**
  * Pipeline execution context that tracks the primary data flow and registered DataFrames.
  *
@@ -24,9 +22,9 @@ import scala.collection.mutable
  */
 case class PipelineContext(
     primary: Either[GenericRecord, DataFrame],
-    dataFrames: mutable.Map[String, DataFrame] = mutable.Map.empty,
-    streamingQueries: mutable.Map[String, StreamingQuery] = mutable.Map.empty,
-    cachedDataFrames: mutable.Set[String] = mutable.Set.empty,
+    dataFrames: Map[String, DataFrame] = Map.empty,
+    streamingQueries: Map[String, StreamingQuery] = Map.empty,
+    cachedDataFrames: Set[String] = Set.empty,
     isStreamingMode: Boolean = false,
 ) {
 
@@ -42,10 +40,8 @@ case class PipelineContext(
    * @param df   DataFrame to register
    * @return Updated context with registered DataFrame
    */
-  def register(name: String, df: DataFrame): PipelineContext = {
-    dataFrames.put(name, df)
-    this
-  }
+  def register(name: String, df: DataFrame): PipelineContext =
+    this.copy(dataFrames = dataFrames + (name -> df))
 
   /**
    * Retrieves a registered DataFrame by name.
@@ -101,7 +97,7 @@ case class PipelineContext(
    *
    * @return Set of registered DataFrame names
    */
-  def registeredNames: Set[String] = dataFrames.keySet.toSet
+  def registeredNames: Set[String] = dataFrames.keySet
 
   /**
    * Clears all registered DataFrames.
@@ -110,10 +106,8 @@ case class PipelineContext(
    *
    * @return Updated context with empty DataFrame registry
    */
-  def clearRegistry(): PipelineContext = {
-    dataFrames.clear()
-    this
-  }
+  def clearRegistry(): PipelineContext =
+    this.copy(dataFrames = Map.empty)
 
   /**
    * Registers a streaming query for lifecycle management.
@@ -125,9 +119,8 @@ case class PipelineContext(
    * @return Updated context
    */
   def registerStreamingQuery(name: String, query: StreamingQuery): PipelineContext = {
-    streamingQueries.put(name, query)
     logger.info(s"Registered streaming query: $name (id=${query.id})")
-    this
+    this.copy(streamingQueries = streamingQueries + (name -> query))
   }
 
   /**
@@ -144,7 +137,7 @@ case class PipelineContext(
    *
    * @return Set of registered query names
    */
-  def streamingQueryNames: Set[String] = streamingQueries.keySet.toSet
+  def streamingQueryNames: Set[String] = streamingQueries.keySet
 
   /**
    * Stops all running streaming queries.
@@ -160,7 +153,6 @@ case class PipelineContext(
           query.stop()
         }
       }
-      streamingQueries.clear()
     }
 
   /**
@@ -204,8 +196,7 @@ case class PipelineContext(
       case Some(df) =>
         logger.info(s"Caching DataFrame '$name' with storage level: $storageLevel")
         df.persist(storageLevel)
-        cachedDataFrames.add(name)
-        this
+        this.copy(cachedDataFrames = cachedDataFrames + name)
       case None     =>
         logger.warn(s"Cannot cache DataFrame '$name' - not found in registry")
         this
@@ -222,8 +213,7 @@ case class PipelineContext(
       case Right(df) =>
         logger.info(s"Caching primary DataFrame with storage level: $storageLevel")
         df.persist(storageLevel)
-        cachedDataFrames.add("__primary__")
-        this
+        this.copy(cachedDataFrames = cachedDataFrames + "__primary__")
       case Left(_)   =>
         logger.warn("Cannot cache primary - it's an Avro GenericRecord, not a DataFrame")
         this
@@ -240,8 +230,7 @@ case class PipelineContext(
       case Some(df) =>
         logger.info(s"Uncaching DataFrame '$name'")
         df.unpersist(blocking = false)
-        cachedDataFrames.remove(name)
-        this
+        this.copy(cachedDataFrames = cachedDataFrames - name)
       case None     =>
         logger.warn(s"Cannot uncache DataFrame '$name' - not found in registry")
         this
@@ -267,10 +256,8 @@ case class PipelineContext(
           dataFrames.get(name).foreach(_.unpersist(blocking))
         }
       }
-
-      cachedDataFrames.clear()
     }
-    this
+    this.copy(cachedDataFrames = Set.empty)
   }
 
   /**
@@ -288,7 +275,7 @@ case class PipelineContext(
    * @return Set of cached DataFrame names
    */
   def cachedNames: Set[String] =
-    cachedDataFrames.toSet
+    cachedDataFrames
 }
 
 /**
